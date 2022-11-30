@@ -21,6 +21,7 @@ type Lease struct {
 	Secondaries []ServerAddress
 }
 
+// PersistentChunkInfo chunk info thats stored within the chunk server.
 type PersistentChunkInfo struct {
 	Handle   ChunkHandle
 	Length   Offset
@@ -83,9 +84,9 @@ const (
 	MaxAppendSize      = MaxChunkSize / 4
 	DeletedFilePrefix  = "__del__"
 
-	// master
+	// leader
 	ServerCheckInterval = 400 * time.Millisecond //
-	MasterStoreInterval = 30 * time.Hour         // 30 * time.Minute
+	LeaderStoreInterval = 30 * time.Hour         // 30 * time.Minute
 	ServerTimeout       = 1 * time.Second
 
 	// chunk server

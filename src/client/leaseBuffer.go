@@ -15,6 +15,33 @@ type leaseBuffer struct {
 	tick time.Duration
 }
 
+func newLeaseBuffer(leaderAddr gfs.ServerAddress, tick time.Duration) *leaseBuffer {
+	buf := &leaseBuffer{
+		buffer: make(map[gfs.ChunkHandle]*gfs.Lease),
+		tick:   tick,
+		leader: leaderAddr,
+	}
+
+	// cleanup
+	go func() {
+		ticker := time.Tick(tick)
+		for {
+			<-ticker
+			now := time.Now()
+			buf.Lock()
+			for id, item := range buf.buffer {
+				if item.Expire.Before(now) {
+					delete(buf.buffer, id)
+				}
+			}
+			buf.Unlock()
+		}
+	}()
+
+	return buf
+
+}
+
 func (buf *leaseBuffer) Get(handle gfs.ChunkHandle) (*gfs.Lease, error) {
 	buf.Lock()
 	defer buf.Unlock()
@@ -27,17 +54,10 @@ func (buf *leaseBuffer) Get(handle gfs.ChunkHandle) (*gfs.Lease, error) {
 			return nil, err
 		}
 
-		lease = &gfs.Lease{l.Primary, l.Expire, l.Secondaries}
+		lease = &gfs.Lease{Primary: l.Primary, Expire: l.Expire, Secondaries: l.Secondaries}
 		buf.buffer[handle] = lease
 		return lease, nil
 	}
-	// extend lease (it is the work of chunk server)
-	/*
-	   go func() {
-	       var r gfs.ExtendLeaseReply
-	       util.Call(buf.leader, "Leader.RPCExtendLease", gfs.ExtendLeaseArg{handle, lease.Primary}, &r)
-	       lease.Expire = r.Expire
-	   }()
-	*/
+
 	return lease, nil
 }

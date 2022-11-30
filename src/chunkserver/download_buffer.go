@@ -47,22 +47,24 @@ func newDownloadBuffer(expire, tick time.Duration) *downloadBuffer {
 	return buf
 }
 
-// allocate a new DataID for given handle
+// NewDataID allocate a new DataID for given handle
 func NewDataID(handle gfs.ChunkHandle) gfs.DataBufferID {
 	now := time.Now()
 	timeStamp := now.Nanosecond() + now.Second()*1000 + now.Minute()*60*1000
-	return gfs.DataBufferID{handle, timeStamp}
+	return gfs.DataBufferID{Handle: handle, TimeStamp: timeStamp}
 }
 
 func (buf *downloadBuffer) Set(id gfs.DataBufferID, data []byte) {
 	buf.Lock()
 	defer buf.Unlock()
+
 	buf.buffer[id] = downloadItem{data, time.Now().Add(buf.expire)}
 }
 
 func (buf *downloadBuffer) Get(id gfs.DataBufferID) ([]byte, bool) {
 	buf.Lock()
 	defer buf.Unlock()
+
 	item, ok := buf.buffer[id]
 	if !ok {
 		return nil, ok
@@ -87,5 +89,6 @@ func (buf *downloadBuffer) Fetch(id gfs.DataBufferID) ([]byte, error) {
 func (buf *downloadBuffer) Delete(id gfs.DataBufferID) {
 	buf.Lock()
 	defer buf.Unlock()
+	
 	delete(buf.buffer, id)
 }

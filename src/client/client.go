@@ -8,7 +8,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"io"
 	"math/rand"
-	"time"
 )
 
 type Client struct {
@@ -110,15 +109,7 @@ func (c *Client) Read(path gfs.Path, offset gfs.Offset, data []byte) (n int, err
 		}
 
 		var n int
-		//wait := time.NewTimer(gfs.ClientTryTimeout)
-		//loop:
 		for {
-			//select {
-			//case <-wait.C:
-			//    err = gfs.Error{gfs.Timeout, "Read Timeout"}
-			//    break loop
-			//default:
-			//}
 			n, err = c.ReadChunk(handle, chunkOffsetWithinChunk, data[currentPosition:])
 			if err == nil || err.(gfs.Error).Code == gfs.ReadEOF {
 				break
@@ -170,15 +161,7 @@ func (c *Client) Write(path gfs.Path, offset gfs.Offset, data []byte) error {
 			writeLen = writeMax
 		}
 
-		//wait := time.NewTimer(gfs.ClientTryTimeout)
-		//loop:
 		for {
-			//select {
-			//case <-wait.C:
-			//    err = fmt.Errorf("Write Timeout")
-			//    break loop
-			//default:
-			//}
 			err = c.WriteChunk(handle, chunkOffset, data[begin:begin+writeLen])
 			if err == nil {
 				break
@@ -201,9 +184,6 @@ func (c *Client) Write(path gfs.Path, offset gfs.Offset, data []byte) error {
 }
 
 // helper FUNCTIONS
-func newLeaseBuffer(leaderAddr gfs.ServerAddress, tick time.Duration) *leaseBuffer {
-
-}
 
 // GetChunkHandle returns the chunk handle of (path, index).
 // If the chunk doesn't exist, leader will create one.
@@ -274,4 +254,43 @@ func (c *Client) WriteChunk(handle gfs.ChunkHandle, offset gfs.Offset, data []by
 	wcargs := gfs.WriteChunkArg{DataID: dataID, Offset: offset, Secondaries: l.Secondaries}
 	err = util.Execute(l.Primary, "ChunkServer.RPCWriteChunk", wcargs, &gfs.WriteChunkResponse{})
 	return err
+}
+
+// AppendChunk appends data to a chunk.
+// if success, Chunk offset of the start point of data will be returned.
+// <code>len(data)</code> should be within 1/4 chunk size.
+func (c *Client) AppendChunk(handle gfs.ChunkHandle, data []byte) (offset gfs.Offset, err error) {
+	if len(data) > gfs.MaxAppendSize {
+		return 0, gfs.Error{Code: gfs.UnknownError, Err: fmt.Sprintf("len(data) = %v > max append size %v", len(data), gfs.MaxAppendSize)}
+	}
+
+	log.Infof("Client : get lease ")
+
+	l, err := c.leaseBuffer.Get(handle)
+	if err != nil {
+		return -1, gfs.Error{Code: gfs.UnknownError, Err: err.Error()}
+	}
+
+	dataID := chunkserver.NewDataID(handle)
+	chain := append(l.Secondaries, l.Primary)
+
+	log.Warning("Client : get locations %v", chain)
+	var d gfs.ForwardDataResponse
+	err = util.Execute(chain[0], "ChunkServer.RPCForwardData", gfs.ForwardDataArg{DataID: dataID, Data: data, ChainOrder: chain[1:]}, &d)
+	if err != nil {
+		return -1, gfs.Error{gfs.UnknownError, err.Error()}
+	}
+
+	log.Warning("Client : send append request to primary. data : %v", dataID)
+
+	var a gfs.AppendChunkResponse
+	appendChunkArgs := gfs.AppendChunkArg{DataID: dataID, Secondaries: l.Secondaries}
+	err = util.Execute(l.Primary, "ChunkServer.RPCAppendChunk", appendChunkArgs, &a)
+	if err != nil {
+		return -1, gfs.Error{gfs.UnknownError, err.Error()}
+	}
+	if a.ErrorCode == gfs.AppendExceedChunkSize {
+		return a.Offset, gfs.Error{a.ErrorCode, "append over chunks"}
+	}
+	return a.Offset, nil
 }
